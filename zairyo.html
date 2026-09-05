@@ -223,9 +223,18 @@ function onMakerChange() {
   $('specSel').innerHTML = list.length
     ? list.map(s => '<option value="' + esc(s.id) + '">' + esc(s.label) + '</option>').join('')
     : '<option value="">(該当なし)</option>';
+  // メーカーを選んでいればそのメーカーのカタログだけ、未選択なら全部を出す。
+  // カタログ本体と価格表はグループを分ける(Driveの「カタログ」フォルダの中身がそのまま並ぶ)。
   const cats = MASTER.catalog.filter(c => !maker || c.maker === maker);
-  $('catalog').innerHTML = '<option value="">-- カタログを開く --</option>' +
-    cats.map(c => '<option value="' + esc(c.url) + '">' + esc(c.name) + '</option>').join('');
+  const group = (kind) => {
+    const list = cats.filter(c => c.kind === kind);
+    if (!list.length) return '';
+    return '<optgroup label="' + esc(kind) + '">' +
+      list.map(c => '<option value="' + esc(c.url) + '">' +
+        esc((maker ? '' : (c.folder || '') + ' / ') + c.name) + '</option>').join('') + '</optgroup>';
+  };
+  $('catalog').innerHTML = '<option value="">-- カタログを開く（' + cats.length + '件） --</option>' +
+    group('カタログ') + group('価格表');
 }
 
 function openCatalog() {
