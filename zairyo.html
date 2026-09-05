@@ -313,7 +313,7 @@ function setChoice(key, no, material) {
 // ══════════════════════════════════════════
 function computeLines() {
   const map = new Map(); // 材料名 -> {material, rows:[{usage,usageUnit,pack,packUnit,deliveryUnit,qty}]}
-  state.specs.forEach(s => {
+  state.specs.forEach((s, si) => {
     (STEPS[s.specId] || []).forEach(st => {
       let material = st.material, usage = st.usage, pack = st.pack, usageUnit = st.usageUnit, packUnit = st.packUnit;
       if (st.selectable) {
@@ -335,11 +335,12 @@ function computeLines() {
       const g = map.get(material);
       let row = g.rows.find(r => r.editKey === editKey);
       if (!row) {
-        row = { editKey: editKey, usage: u, usageUnit: usageUnit, pack: p, packUnit: packUnit, deliveryUnit: st.deliveryUnit, qty: 0, parts: [] };
+        row = { editKey: editKey, usage: u, usageUnit: usageUnit, pack: p, packUnit: packUnit, deliveryUnit: st.deliveryUnit, qty: 0, parts: [], specIdx: [] };
         g.rows.push(row);
       }
       row.qty += p > 0 ? (s.area * u) / p : 0;
       row.parts.push(s.areaKind || s.label);
+      if (row.specIdx.indexOf(si) < 0) row.specIdx.push(si); // Excel出力で面積セルを参照する数式に使う
     });
   });
 
@@ -350,7 +351,7 @@ function computeLines() {
       lines.push({
         material: g.material, label: g.material + (g.rows.length > 1 ? '（' + [...new Set(r.parts)].join('・') + '）' : ''),
         editKey: r.editKey, usage: r.usage, usageUnit: r.usageUnit, pack: r.pack, packUnit: r.packUnit,
-        deliveryUnit: r.deliveryUnit, qty: r.qty,
+        deliveryUnit: r.deliveryUnit, qty: r.qty, specIdx: r.specIdx,
         first: i === 0, groupSize: g.rows.length,
         delivery: i === 0 ? Math.ceil(round2(total) - 1e-9) : '',
         breakdown: BREAKDOWN[g.material] || null, manual: false
@@ -483,7 +484,7 @@ async function exportExcel() {
   const lines = computeLines().map(ln => ({
     material: ln.material, label: ln.label, usage: ln.usage, pack: ln.pack, packUnit: ln.packUnit,
     qty: ln.manual ? '' : round2(ln.qty), delivery: ln.delivery, deliveryUnit: ln.deliveryUnit,
-    breakdown: ln.breakdown, manual: ln.manual
+    breakdown: ln.breakdown, manual: ln.manual, specIdx: ln.specIdx || []
   }));
   const specs = state.specs.map(s => ({
     label: s.label,
