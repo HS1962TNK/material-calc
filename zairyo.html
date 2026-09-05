@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>使用材料計算書</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Hiragino Sans','Yu Gothic',sans-serif;background:#e8e8e6;color:#1a1a1a;padding-bottom:60px}
+
+.toolbar{background:#1B3A6B;color:#fff;padding:14px 16px;position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between;box-shadow:0 2px 8px rgba(0,0,0,.2)}
+.toolbar h1{font-size:16px;font-weight:700}
+.toolbar .actions{display:flex;gap:8px}
+.toolbar button{background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.35);border-radius:6px;padding:6px 10px;font-size:12px;font-family:inherit;cursor:pointer}
+.toolbar button:hover{background:rgba(255,255,255,.28)}
+
+.wrap{max-width:1000px;margin:0 auto;padding:14px}
+.card{background:#fff;border-radius:12px;padding:14px 16px;box-shadow:0 1px 4px rgba(0,0,0,.1);margin-bottom:14px}
+.card-title{font-size:13px;font-weight:700;color:#1B3A6B;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between}
+
+label.f{display:block;font-size:12px;color:#6b7280;margin:8px 0 3px}
+input,select,textarea{width:100%;padding:9px 10px;border:1.5px solid #d5d7db;border-radius:8px;font-size:14px;font-family:inherit;background:#fff}
+input:focus,select:focus{outline:none;border-color:#1B3A6B}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.row3{display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px}
+
+button.primary{background:#1B3A6B;color:#fff;border:none;border-radius:8px;padding:11px 16px;font-size:14px;font-weight:700;font-family:inherit;cursor:pointer}
+button.primary:disabled{background:#9aa3af;cursor:default}
+button.sub{background:#fff;color:#1B3A6B;border:1.5px solid #1B3A6B;border-radius:8px;padding:9px 14px;font-size:13px;font-weight:700;font-family:inherit;cursor:pointer}
+button.mini{background:#fff;color:#666;border:1px solid #ccc;border-radius:6px;padding:4px 8px;font-size:12px;font-family:inherit;cursor:pointer}
+button.mini.del{color:#c0392b;border-color:#e8b4ae}
+
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{border:1px solid #e3e5e8;padding:6px 8px;text-align:left;vertical-align:middle}
+th{background:#f4f5f7;font-size:12px;color:#4b5563;font-weight:700;white-space:nowrap}
+td.num,th.num{text-align:right;white-space:nowrap}
+td input{padding:5px 6px;font-size:13px;border-width:1px}
+td input.num{text-align:right}
+.tbl-wrap{overflow-x:auto}
+tr.grp-first td{border-top:2px solid #c9cdd3}
+.muted{color:#8a8f98;font-size:12px}
+.warn{color:#b45309}
+
+.spec-row{display:grid;grid-template-columns:1fr 110px 110px 40px;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid #eee}
+.spec-row .name{font-size:13px;font-weight:700}
+.spec-row .sub{font-size:11px;color:#8a8f98}
+.choice{display:grid;grid-template-columns:110px 1fr;gap:8px;align-items:center;margin:6px 0 0 0}
+.choice span{font-size:12px;color:#6b7280}
+
+#toast{position:fixed;left:50%;transform:translateX(-50%);bottom:20px;background:#333;color:#fff;padding:11px 18px;border-radius:8px;font-size:13px;z-index:300;display:none;max-width:90%}
+#banner{background:#fdecea;border:1px solid #f5c6c0;color:#8a2620;padding:10px 14px;border-radius:8px;margin-bottom:12px;font-size:13px;display:none}
+.loading{text-align:center;color:#8a8f98;padding:24px;font-size:13px}
+dialog{border:none;border-radius:12px;padding:0;max-width:560px;width:92%;box-shadow:0 8px 30px rgba(0,0,0,.3)}
+dialog::backdrop{background:rgba(0,0,0,.4)}
+.dlg-head{padding:14px 16px;border-bottom:1px solid #eee;font-weight:700;font-size:14px;color:#1B3A6B}
+.dlg-body{padding:14px 16px;max-height:60vh;overflow-y:auto}
+.dlg-foot{padding:12px 16px;border-top:1px solid #eee;display:flex;gap:8px;justify-content:flex-end}
+.doc-item{padding:10px;border:1px solid #e3e5e8;border-radius:8px;margin-bottom:8px;cursor:pointer}
+.doc-item:hover{background:#f4f7fb}
+.cat-link{display:block;font-size:12px;color:#1B3A6B;padding:3px 0;text-decoration:none}
+.cat-link:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <h1>📋 使用材料計算書</h1>
+  <div class="actions">
+    <button onclick="openDocs()">開く</button>
+    <button onclick="newDoc()">新規</button>
+    <button onclick="saveDoc()">保存</button>
+    <button onclick="exportExcel()">Excel</button>
+  </div>
+</div>
+
+<div class="wrap">
+  <div id="banner"></div>
+
+  <div class="card">
+    <div class="card-title"><span>工事情報</span><span class="muted" id="docId"></span></div>
+    <label class="f">工事名</label>
+    <input id="jobName" placeholder="例: 東京消防庁小金井消防署庁舎(7)外壁その他改修工事">
+    <label class="f">住所</label>
+    <input id="address" placeholder="例: 東京都小金井市本町六丁目6番1号">
+    <div class="row2">
+      <div>
+        <label class="f">メーカー</label>
+        <select id="maker" onchange="onMakerChange()"></select>
+      </div>
+      <div>
+        <label class="f">カタログ</label>
+        <select id="catalog" onchange="openCatalog()"><option value="">-- カタログを開く --</option></select>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title"><span>工法と面積</span></div>
+    <div class="row3">
+      <div>
+        <label class="f">工法(仕様)</label>
+        <select id="specSel"></select>
+      </div>
+      <div>
+        <label class="f">区分</label>
+        <select id="areaKind"><option value="平場">平場</option><option value="立上り">立上り</option><option value="">その他</option></select>
+      </div>
+      <div>
+        <label class="f">面積(m2)</label>
+        <input id="areaVal" type="number" inputmode="decimal" step="0.01" placeholder="223">
+      </div>
+    </div>
+    <div style="margin-top:10px"><button class="primary" onclick="addSpec()">＋ この工法を追加</button></div>
+    <div id="specList" style="margin-top:12px"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">
+      <span>使用材料と搬入数量</span>
+      <button class="mini" onclick="addManualLine()">＋ 材料を手で追加</button>
+    </div>
+    <div id="lines"><div class="loading">工法を追加すると計算されます</div></div>
+    <div class="muted" style="margin-top:10px">※ 使用量・荷姿は編集できます。同じ材料は使用数量を合計してから切り上げます。</div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<dialog id="docsDlg">
+  <div class="dlg-head">保存済みの計算書</div>
+  <div class="dlg-body" id="docsBody"><div class="loading">読み込み中...</div></div>
+  <div class="dlg-foot"><button class="sub" onclick="document.getElementById('docsDlg').close()">閉じる</button></div>
+</dialog>
+
+<script>
+// ══════════════════════════════════════════
+//  設定
+// ══════════════════════════════════════════
+// 使用材料計算書アプリのGAS Web App(gas-zairyo-master)。デプロイし直してURLが変わったらここを直す。
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbyiIS-k2eCcjR0K7KyACNJ00ClGHQRSJsNU896aN-4X3uEXMbTqndAVuozFbgVKOBRirw/exec';
+
+// ══════════════════════════════════════════
+//  共通
+// ══════════════════════════════════════════
+const $ = (id) => document.getElementById(id);
+function esc(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+let toastTimer = null;
+function toast(msg, ms) {
+  const t = $('toast'); t.textContent = msg; t.style.display = 'block';
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.style.display = 'none'; }, ms || 2600);
+}
+function banner(msg) {
+  const b = $('banner');
+  if (!msg) { b.style.display = 'none'; return; }
+  b.textContent = msg; b.style.display = 'block';
+}
+async function apiGet(params) {
+  const q = Object.keys(params).map(k => encodeURIComponent(k) + '=' + encodeURIComponent(params[k])).join('&');
+  const res = await fetch(GAS_URL + '?' + q);
+  return await res.json();
+}
+async function apiPost(payload) {
+  // GASはpreflightに応答できないため、Content-Typeヘッダーは付けない(付けると全POSTが失敗する)
+  const res = await fetch(GAS_URL, { method: 'POST', body: JSON.stringify(payload) });
+  return await res.json();
+}
+const numOr = (v, d) => (v === '' || v === null || v === undefined || isNaN(Number(v)) ? d : Number(v));
+// 表示用に丸める(浮動小数の 0.30000000000000004 を出さない)
+const round2 = (n) => Math.round(n * 100) / 100;
+
+// ══════════════════════════════════════════
+//  状態
+// ══════════════════════════════════════════
+let MASTER = { makers: [], specs: [], catalog: [] };
+let STEPS = {};      // specId -> [工程]
+let OPTIONS = {};    // 選択肢グループ -> [候補]
+let BREAKDOWN = {};  // 材料名 -> {main,hardener,other,unit}
+
+let state = {
+  id: '', jobName: '', address: '', maker: '', kind: '',
+  specs: [],      // {key, specId, label, areaKind, area, choices:{順序: 材料名}}
+  manual: [],     // {key, material, delivery, deliveryUnit}
+  edits: {}       // '材料名|使用量キー' -> {usage, pack}
+};
+let seq = 0;
+const newKey = () => 'k' + (++seq);
+
+// ══════════════════════════════════════════
+//  初期化
+// ══════════════════════════════════════════
+async function init() {
+  try {
+    const r = await apiGet({ action: 'getInit' });
+    if (r.status !== 'ok') { banner('マスターの読み込みに失敗しました: ' + (r.message || '')); return; }
+    MASTER = r;
+    if (!MASTER.specs.length) { banner('マスターが空です。スプレッドシートで setupMasters を実行してください。'); }
+    buildMakerSelect();
+    banner('');
+  } catch (e) {
+    banner('通信に失敗しました。ネットワークを確認してください(' + e + ')');
+  }
+}
+
+function buildMakerSelect() {
+  const sel = $('maker');
+  sel.innerHTML = '<option value="">-- 選択 --</option>' +
+    MASTER.makers.map(m => {
+      const v = m.maker + '\t' + m.kind;
+      const label = m.kind ? m.maker + '(' + m.kind + ')' : m.maker;
+      return '<option value="' + esc(v) + '">' + esc(label) + '</option>';
+    }).join('');
+}
+
+function onMakerChange() {
+  const v = $('maker').value;
+  const [maker, kind] = v ? v.split('\t') : ['', ''];
+  state.maker = maker; state.kind = kind;
+  const list = MASTER.specs.filter(s => s.maker === maker && s.kind === kind);
+  $('specSel').innerHTML = list.length
+    ? list.map(s => '<option value="' + esc(s.id) + '">' + esc(s.label) + '</option>').join('')
+    : '<option value="">(該当なし)</option>';
+  const cats = MASTER.catalog.filter(c => !maker || c.maker === maker);
+  $('catalog').innerHTML = '<option value="">-- カタログを開く --</option>' +
+    cats.map(c => '<option value="' + esc(c.url) + '">' + esc(c.name) + '</option>').join('');
+}
+
+function openCatalog() {
+  const url = $('catalog').value;
+  if (url) window.open(url, '_blank');
+  $('catalog').value = '';
+}
+
+// ══════════════════════════════════════════
+//  工法の追加・削除
+// ══════════════════════════════════════════
+async function addSpec() {
+  const specId = $('specSel').value;
+  const area = numOr($('areaVal').value, 0);
+  if (!specId) { toast('工法を選んでください'); return; }
+  if (!area) { toast('面積を入力してください'); return; }
+  const spec = MASTER.specs.find(s => s.id === specId);
+  state.specs.push({ key: newKey(), specId: specId, label: spec ? spec.label : specId, areaKind: $('areaKind').value, area: area, choices: {} });
+  $('areaVal').value = '';
+  await ensureSteps();
+  renderSpecs();
+  recalc();
+}
+
+function removeSpec(key) {
+  state.specs = state.specs.filter(s => s.key !== key);
+  renderSpecs();
+  recalc();
+}
+
+// 追加済みの工法のうち、まだ工程を取っていないものをまとめて取得する
+async function ensureSteps() {
+  const need = state.specs.map(s => s.specId).filter(id => !STEPS[id]);
+  if (!need.length) return;
+  const r = await apiGet({ action: 'getSteps', ids: [...new Set(need)].join(',') });
+  if (r.status !== 'ok') { toast('工程の読み込みに失敗しました'); return; }
+  Object.assign(STEPS, r.steps);
+  Object.assign(OPTIONS, r.options);
+  Object.assign(BREAKDOWN, r.breakdown);
+  // 選択式の工程は、既定でシートに入っていた材料(あれば)を初期選択にする
+  state.specs.forEach(s => {
+    (STEPS[s.specId] || []).forEach(st => {
+      if (st.selectable && !s.choices[st.no]) s.choices[st.no] = st.material || '';
+    });
+  });
+}
+
+function renderSpecs() {
+  const el = $('specList');
+  if (!state.specs.length) { el.innerHTML = '<div class="muted">まだ追加されていません</div>'; return; }
+  el.innerHTML = state.specs.map(s => {
+    const steps = STEPS[s.specId] || [];
+    const choices = steps.filter(st => st.selectable).map(st => {
+      const opts = OPTIONS[st.optionGroup] || [];
+      const cur = s.choices[st.no] || '';
+      return '<div class="choice"><span>' + esc(st.category || '選択') + '</span>' +
+        '<select onchange="setChoice(\'' + s.key + '\',' + st.no + ',this.value)">' +
+        '<option value="">-- 使わない --</option>' +
+        opts.map(o => '<option value="' + esc(o.material) + '"' + (o.material === cur ? ' selected' : '') + '>' +
+          esc(o.material) + '（' + o.usage + o.usageUnit + '/m2, ' + o.pack + o.packUnit + '）</option>').join('') +
+        '</select></div>';
+    }).join('');
+    return '<div class="spec-row">' +
+      '<div><div class="name">' + esc(s.label) + '</div><div class="sub">' + steps.length + '工程</div></div>' +
+      '<div class="muted">' + esc(s.areaKind || '-') + '</div>' +
+      '<div><input class="num" type="number" step="0.01" value="' + s.area + '" onchange="setArea(\'' + s.key + '\',this.value)"></div>' +
+      '<div><button class="mini del" onclick="removeSpec(\'' + s.key + '\')">✕</button></div>' +
+      '</div>' + (choices ? '<div style="margin:0 0 10px 4px">' + choices + '</div>' : '');
+  }).join('');
+}
+
+function setArea(key, v) {
+  const s = state.specs.find(x => x.key === key);
+  if (s) { s.area = numOr(v, 0); recalc(); }
+}
+function setChoice(key, no, material) {
+  const s = state.specs.find(x => x.key === key);
+  if (s) { s.choices[no] = material; recalc(); }
+}
+
+// ══════════════════════════════════════════
+//  計算
+//  工法ごとに 面積×使用量÷荷姿 = 使用数量。同じ材料は使用数量を合計してから切り上げて搬入数量にする
+//  (元のExcelの =ROUNDUP(F42+F43,0) と同じ考え方)。
+// ══════════════════════════════════════════
+function computeLines() {
+  const map = new Map(); // 材料名 -> {material, rows:[{usage,usageUnit,pack,packUnit,deliveryUnit,qty}]}
+  state.specs.forEach(s => {
+    (STEPS[s.specId] || []).forEach(st => {
+      let material = st.material, usage = st.usage, pack = st.pack, usageUnit = st.usageUnit, packUnit = st.packUnit;
+      if (st.selectable) {
+        const chosen = s.choices[st.no];
+        if (!chosen) return;
+        const o = (OPTIONS[st.optionGroup] || []).find(x => x.material === chosen);
+        if (!o) return;
+        material = o.material; usage = o.usage; pack = o.pack;
+        usageUnit = o.usageUnit || st.usageUnit; packUnit = o.packUnit || st.packUnit;
+      }
+      if (!material) return;
+
+      const editKey = material + '|' + usage;
+      const ed = state.edits[editKey] || {};
+      const u = numOr(ed.usage, numOr(usage, 0));
+      const p = numOr(ed.pack, numOr(pack, 0));
+
+      if (!map.has(material)) map.set(material, { material: material, rows: [] });
+      const g = map.get(material);
+      let row = g.rows.find(r => r.editKey === editKey);
+      if (!row) {
+        row = { editKey: editKey, usage: u, usageUnit: usageUnit, pack: p, packUnit: packUnit, deliveryUnit: st.deliveryUnit, qty: 0, parts: [] };
+        g.rows.push(row);
+      }
+      row.qty += p > 0 ? (s.area * u) / p : 0;
+      row.parts.push(s.areaKind || s.label);
+    });
+  });
+
+  const lines = [];
+  map.forEach(g => {
+    const total = g.rows.reduce((a, r) => a + r.qty, 0);
+    g.rows.forEach((r, i) => {
+      lines.push({
+        material: g.material, label: g.material + (g.rows.length > 1 ? '（' + [...new Set(r.parts)].join('・') + '）' : ''),
+        editKey: r.editKey, usage: r.usage, usageUnit: r.usageUnit, pack: r.pack, packUnit: r.packUnit,
+        deliveryUnit: r.deliveryUnit, qty: r.qty,
+        first: i === 0, groupSize: g.rows.length,
+        delivery: i === 0 ? Math.ceil(round2(total) - 1e-9) : '',
+        breakdown: BREAKDOWN[g.material] || null, manual: false
+      });
+    });
+  });
+  state.manual.forEach(mn => {
+    lines.push({
+      material: mn.material, label: mn.material, editKey: 'manual|' + mn.key, usage: '', usageUnit: '',
+      pack: '', packUnit: '', deliveryUnit: mn.deliveryUnit, qty: '', first: true, groupSize: 1,
+      delivery: mn.delivery, breakdown: BREAKDOWN[mn.material] || null, manual: true, key: mn.key
+    });
+  });
+  return lines;
+}
+
+function recalc() {
+  const lines = computeLines();
+  const el = $('lines');
+  if (!lines.length) { el.innerHTML = '<div class="loading">工法を追加すると計算されます</div>'; return; }
+  el.innerHTML = '<div class="tbl-wrap"><table><thead><tr>' +
+    '<th>材料名</th><th class="num">使用量</th><th class="num">荷姿</th><th class="num">使用数量</th><th class="num">搬入数量</th><th>単位</th><th></th>' +
+    '</tr></thead><tbody>' +
+    lines.map(ln => {
+      if (ln.manual) {
+        return '<tr class="grp-first"><td><input value="' + esc(ln.material) + '" onchange="setManual(\'' + ln.key + '\',\'material\',this.value)"></td>' +
+          '<td class="num muted">-</td><td class="num muted">-</td><td class="num muted">-</td>' +
+          '<td class="num"><input class="num" type="number" step="1" value="' + ln.delivery + '" onchange="setManual(\'' + ln.key + '\',\'delivery\',this.value)"></td>' +
+          '<td><input value="' + esc(ln.deliveryUnit || '') + '" onchange="setManual(\'' + ln.key + '\',\'deliveryUnit\',this.value)"></td>' +
+          '<td><button class="mini del" onclick="removeManual(\'' + ln.key + '\')">✕</button></td></tr>';
+      }
+      return '<tr' + (ln.first ? ' class="grp-first"' : '') + '>' +
+        '<td>' + esc(ln.label) + '</td>' +
+        '<td class="num"><input class="num" type="number" step="0.01" value="' + ln.usage + '" onchange="setEdit(\'' + esc(ln.editKey) + '\',\'usage\',this.value)"> ' + esc(ln.usageUnit || '') + '</td>' +
+        '<td class="num"><input class="num" type="number" step="0.01" value="' + ln.pack + '" onchange="setEdit(\'' + esc(ln.editKey) + '\',\'pack\',this.value)"> ' + esc(ln.packUnit || '') + '</td>' +
+        '<td class="num">' + round2(ln.qty) + '</td>' +
+        '<td class="num"><b>' + (ln.first ? ln.delivery : '') + '</b></td>' +
+        '<td>' + esc(ln.first ? (ln.deliveryUnit || '') : '') + '</td><td></td></tr>';
+    }).join('') + '</tbody></table></div>';
+}
+
+function setEdit(editKey, field, v) {
+  if (!state.edits[editKey]) state.edits[editKey] = {};
+  state.edits[editKey][field] = v;
+  recalc();
+}
+function addManualLine() {
+  state.manual.push({ key: newKey(), material: '', delivery: 1, deliveryUnit: '缶' });
+  recalc();
+}
+function setManual(key, field, v) {
+  const m = state.manual.find(x => x.key === key);
+  if (m) { m[field] = field === 'delivery' ? numOr(v, 0) : v; recalc(); }
+}
+function removeManual(key) {
+  state.manual = state.manual.filter(x => x.key !== key);
+  recalc();
+}
+
+// ══════════════════════════════════════════
+//  保存・読み込み・Excel
+// ══════════════════════════════════════════
+function collect() {
+  state.jobName = $('jobName').value.trim();
+  state.address = $('address').value.trim();
+  return {
+    id: state.id, jobName: state.jobName, address: state.address, maker: state.maker, kind: state.kind,
+    specs: state.specs, manual: state.manual, edits: state.edits
+  };
+}
+
+async function saveDoc() {
+  const data = collect();
+  if (!data.jobName) { toast('工事名を入力してください'); return; }
+  toast('保存中...', 8000);
+  const r = await apiPost({ action: 'saveDoc', id: state.id, data: data });
+  if (r.status !== 'ok') { toast('保存に失敗しました: ' + (r.message || '')); return; }
+  state.id = r.id;
+  $('docId').textContent = 'ID: ' + r.id;
+  toast('保存しました（' + r.updated + '）');
+}
+
+function newDoc() {
+  state = { id: '', jobName: '', address: '', maker: state.maker, kind: state.kind, specs: [], manual: [], edits: {} };
+  $('jobName').value = ''; $('address').value = ''; $('docId').textContent = '';
+  renderSpecs(); recalc();
+  toast('新規作成にしました');
+}
+
+async function openDocs() {
+  const dlg = $('docsDlg');
+  $('docsBody').innerHTML = '<div class="loading">読み込み中...</div>';
+  dlg.showModal();
+  const r = await apiGet({ action: 'listDocs' });
+  if (r.status !== 'ok') { $('docsBody').innerHTML = '<div class="warn">読み込みに失敗しました</div>'; return; }
+  if (!r.docs.length) { $('docsBody').innerHTML = '<div class="muted">保存された計算書はまだありません</div>'; return; }
+  $('docsBody').innerHTML = r.docs.map(d =>
+    '<div class="doc-item" onclick="loadDoc(\'' + esc(d.id) + '\')">' +
+    '<div style="font-weight:700;font-size:13px">' + esc(d.name || '(無題)') + '</div>' +
+    '<div class="muted">' + esc(d.maker || '') + ' ' + esc(d.kind || '') + ' ／ ' + esc(d.updated) + '</div></div>'
+  ).join('');
+}
+
+async function loadDoc(id) {
+  $('docsDlg').close();
+  toast('読み込み中...', 8000);
+  const r = await apiGet({ action: 'loadDoc', id: id });
+  if (r.status !== 'ok') { toast('読み込みに失敗しました'); return; }
+  const d = r.data || {};
+  state = {
+    id: r.id, jobName: d.jobName || '', address: d.address || '', maker: d.maker || '', kind: d.kind || '',
+    specs: d.specs || [], manual: d.manual || [], edits: d.edits || {}
+  };
+  state.specs.forEach(s => { if (!s.key) s.key = newKey(); if (!s.choices) s.choices = {}; });
+  state.manual.forEach(m => { if (!m.key) m.key = newKey(); });
+  $('jobName').value = state.jobName;
+  $('address').value = state.address;
+  $('docId').textContent = 'ID: ' + state.id;
+  $('maker').value = state.maker ? state.maker + '\t' + state.kind : '';
+  onMakerChange();
+  await ensureSteps();
+  renderSpecs();
+  recalc();
+  toast('読み込みました');
+}
+
+async function exportExcel() {
+  const data = collect();
+  if (!data.jobName) { toast('工事名を入力してください'); return; }
+  const lines = computeLines().map(ln => ({
+    material: ln.material, label: ln.label, usage: ln.usage, pack: ln.pack, packUnit: ln.packUnit,
+    qty: ln.manual ? '' : round2(ln.qty), delivery: ln.delivery, deliveryUnit: ln.deliveryUnit,
+    breakdown: ln.breakdown, manual: ln.manual
+  }));
+  const specs = state.specs.map(s => ({
+    label: s.label,
+    areaFlat: s.areaKind === '平場' ? s.area : '',
+    areaWall: s.areaKind === '立上り' ? s.area : '',
+    areaOther: s.areaKind ? '' : s.area
+  }));
+  toast('Excelを作成中...', 30000);
+  const r = await apiPost({ action: 'exportExcel', data: { jobName: data.jobName, address: data.address, maker: data.maker, specs: specs, lines: lines } });
+  if (r.status !== 'ok') { toast('Excel出力に失敗しました: ' + (r.message || '')); return; }
+  const bin = atob(r.base64);
+  const buf = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+  const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = r.fileName || '材料搬入計算書.xlsx';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  toast('Excelをダウンロードしました');
+}
+
+init();
+</script>
+</body>
+</html>
