@@ -11,7 +11,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Hiragino Sans','Yu Gothic',sa
 
 .toolbar{background:#1B3A6B;color:#fff;padding:14px 16px;position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between;box-shadow:0 2px 8px rgba(0,0,0,.2)}
 .toolbar h1{font-size:16px;font-weight:700}
-.toolbar .actions{display:flex;gap:8px}
+.toolbar{flex-wrap:wrap;gap:8px}
+.toolbar .actions{display:flex;gap:8px;flex-wrap:wrap}
 .toolbar button{background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.35);border-radius:6px;padding:6px 10px;font-size:12px;font-family:inherit;cursor:pointer}
 .toolbar button:hover{background:rgba(255,255,255,.28)}
 .toolbar a.manual{background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.35);border-radius:6px;padding:6px 10px;font-size:12px;text-decoration:none;white-space:nowrap;display:inline-flex;align-items:center}
@@ -94,7 +95,7 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
         <select id="maker" onchange="onMakerChange()"></select>
       </div>
       <div>
-        <label class="f">カタログ<span class="muted">（下地処理などの材料を調べる用。工事のメーカーは変わりません）</span></label>
+        <label class="f">カタログを見る<span class="muted">（工事のメーカーは変わりません）</span></label>
         <div class="row2">
           <select id="catMaker" onchange="buildCatalogSelect()"></select>
           <select id="catalog" onchange="openCatalog()"><option value="">-- カタログを開く --</option></select>
