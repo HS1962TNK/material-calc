@@ -37,6 +37,8 @@ th{background:#f4f5f7;font-size:12px;color:#4b5563;font-weight:700;white-space:n
 td.num,th.num{text-align:right;white-space:nowrap}
 td input{padding:5px 6px;font-size:13px;border-width:1px}
 td input.num{text-align:right}
+td input.w50{width:50px}td input.w60{width:62px}
+td.num input+input{margin-left:3px}
 .tbl-wrap{overflow-x:auto}
 tr.grp-first td{border-top:2px solid #c9cdd3}
 .muted{color:#8a8f98;font-size:12px}
@@ -89,8 +91,11 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
         <select id="maker" onchange="onMakerChange()"></select>
       </div>
       <div>
-        <label class="f">カタログ</label>
-        <select id="catalog" onchange="openCatalog()"><option value="">-- カタログを開く --</option></select>
+        <label class="f">カタログ<span class="muted">（下地処理などの材料を調べる用。工事のメーカーは変わりません）</span></label>
+        <div class="row2">
+          <select id="catMaker" onchange="buildCatalogSelect()"></select>
+          <select id="catalog" onchange="openCatalog()"><option value="">-- カタログを開く --</option></select>
+        </div>
       </div>
     </div>
   </div>
@@ -199,6 +204,8 @@ async function init() {
     MASTER = r;
     if (!MASTER.specs.length) { banner('マスターが空です。スプレッドシートで setupMasters を実行してください。'); }
     buildMakerSelect();
+    buildCatMakerSelect();
+    buildCatalogSelect();
     banner('');
   } catch (e) {
     banner('通信に失敗しました。ネットワークを確認してください(' + e + ')');
@@ -223,7 +230,32 @@ function onMakerChange() {
   $('specSel').innerHTML = list.length
     ? list.map(s => '<option value="' + esc(s.id) + '">' + esc(s.label) + '</option>').join('')
     : '<option value="">(該当なし)</option>';
-  // メーカーを選んでいればそのメーカーのカタログだけ、未選択なら全部を出す。
+  // カタログ欄の初期値は工事のメーカーに合わせる(いつもの流れは今まで通りの操作感)。
+  // ただしカタログ欄をあとから変えても工事のメーカーは変わらない。
+  if (maker) $('catMaker').value = maker;
+  buildCatalogSelect();
+}
+
+// カタログを見るためのメーカー絞り込み。
+// 下地処理・シーリング材の材料と標準使用量を調べるために、
+// 工事のメーカーとは別に選べるようにしてある(ここを変えても state.maker は動かさない)。
+// メーカーマスターの区分を使って、材料計算ができるメーカーを先に並べる。
+function buildCatMakerSelect() {
+  const kinds = MASTER.makerKinds || {};
+  const names = {};
+  MASTER.catalog.forEach(c => { if (c.maker) names[c.maker] = true; });
+  const rank = m => (kinds[m] === '計算+閲覧' ? 0 : kinds[m] === '閲覧のみ' ? 1 : 2);
+  const list = Object.keys(names).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b, 'ja'));
+  $('catMaker').innerHTML = '<option value="">-- すべてのメーカー --</option>' +
+    list.map(m => {
+      const k = kinds[m] || '';
+      const label = k === '閲覧のみ' ? m + '（閲覧用）' : m;
+      return '<option value="' + esc(m) + '">' + esc(label) + '</option>';
+    }).join('');
+}
+
+function buildCatalogSelect() {
+  const maker = $('catMaker').value;
   // カタログ本体と価格表はグループを分ける(Driveの「カタログ」フォルダの中身がそのまま並ぶ)。
   const cats = MASTER.catalog.filter(c => !maker || c.maker === maker);
   const group = (kind) => {
@@ -367,11 +399,22 @@ function computeLines() {
       });
     });
   });
+  // 手入力行(下地処理など、カタログの標準仕様に載らない工程の材料)。
+  // 使用量と荷姿を入れてあれば、数量(面積・長さ・箇所)から自動で計算する。
+  // どちらかが空なら、今まで通り搬入数量を直接入れる扱いにする。
   state.manual.forEach(mn => {
+    const u = numOr(mn.usage, 0), p = numOr(mn.pack, 0), a = numOr(mn.area, 0);
+    const auto = u > 0 && p > 0;
+    const qty = auto ? (a * u) / p : '';
     lines.push({
-      material: mn.material, label: mn.material, editKey: 'manual|' + mn.key, usage: '', usageUnit: '',
-      pack: '', packUnit: '', deliveryUnit: mn.deliveryUnit, qty: '', first: true, groupSize: 1,
-      delivery: mn.delivery, breakdown: BREAKDOWN[mn.material] || null, manual: true, key: mn.key
+      material: mn.material, label: mn.material, editKey: 'manual|' + mn.key,
+      usage: mn.usage === undefined ? '' : mn.usage, usageUnit: mn.usageUnit || '',
+      pack: mn.pack === undefined ? '' : mn.pack, packUnit: mn.packUnit || '',
+      area: mn.area === undefined ? '' : mn.area,
+      deliveryUnit: mn.deliveryUnit, qty: qty, first: true, groupSize: 1,
+      delivery: auto ? Math.ceil(round2(qty) - 1e-9) : mn.delivery,
+      autoCalc: auto,
+      breakdown: BREAKDOWN[mn.material] || null, manual: true, key: mn.key
     });
   });
   return lines;
@@ -386,10 +429,18 @@ function recalc() {
     '</tr></thead><tbody>' +
     lines.map(ln => {
       if (ln.manual) {
-        return '<tr class="grp-first"><td><input value="' + esc(ln.material) + '" onchange="setManual(\'' + ln.key + '\',\'material\',this.value)"></td>' +
-          '<td class="num muted">-</td><td class="num muted">-</td><td class="num muted">-</td>' +
-          '<td class="num"><input class="num" type="number" step="1" value="' + ln.delivery + '" onchange="setManual(\'' + ln.key + '\',\'delivery\',this.value)"></td>' +
-          '<td><input value="' + esc(ln.deliveryUnit || '') + '" onchange="setManual(\'' + ln.key + '\',\'deliveryUnit\',this.value)"></td>' +
+        const mset = (f) => 'onchange="setManual(\'' + ln.key + '\',\'' + f + '\',this.value)"';
+        return '<tr class="grp-first"><td><input value="' + esc(ln.material) + '" ' + mset('material') + ' placeholder="材料名"></td>' +
+          '<td class="num"><input class="num w60" type="number" step="0.01" value="' + ln.usage + '" ' + mset('usage') + ' placeholder="使用量">' +
+            '<input class="w50" value="' + esc(ln.usageUnit) + '" ' + mset('usageUnit') + ' placeholder="kg"></td>' +
+          '<td class="num"><input class="num w60" type="number" step="0.01" value="' + ln.pack + '" ' + mset('pack') + ' placeholder="荷姿">' +
+            '<input class="w60" value="' + esc(ln.packUnit) + '" ' + mset('packUnit') + ' placeholder="kg/缶"></td>' +
+          '<td class="num"><input class="num w60" type="number" step="0.01" value="' + ln.area + '" ' + mset('area') + ' placeholder="数量">' +
+            (ln.autoCalc ? '<div class="muted">= ' + round2(ln.qty) + '</div>' : '') + '</td>' +
+          '<td class="num">' + (ln.autoCalc
+            ? '<b>' + ln.delivery + '</b>'
+            : '<input class="num w60" type="number" step="1" value="' + ln.delivery + '" ' + mset('delivery') + '>') + '</td>' +
+          '<td><input class="w60" value="' + esc(ln.deliveryUnit || '') + '" ' + mset('deliveryUnit') + '></td>' +
           '<td><button class="mini del" onclick="removeManual(\'' + ln.key + '\')">✕</button></td></tr>';
       }
       return '<tr' + (ln.first ? ' class="grp-first"' : '') + '>' +
@@ -408,12 +459,17 @@ function setEdit(editKey, field, v) {
   recalc();
 }
 function addManualLine() {
-  state.manual.push({ key: newKey(), material: '', delivery: 1, deliveryUnit: '缶' });
+  // 使用量・荷姿・数量は空で始める。入れれば自動計算、入れなければ搬入数量を直接入力。
+  state.manual.push({ key: newKey(), material: '', usage: '', usageUnit: '', pack: '', packUnit: '', area: '', delivery: 1, deliveryUnit: '缶' });
   recalc();
 }
 function setManual(key, field, v) {
   const m = state.manual.find(x => x.key === key);
-  if (m) { m[field] = field === 'delivery' ? numOr(v, 0) : v; recalc(); }
+  if (!m) return;
+  // 数字の欄は数値にする。空欄は空のままにして「未入力」を保てるようにする(0とは区別する)
+  const numFields = ['delivery', 'usage', 'pack', 'area'];
+  m[field] = numFields.indexOf(field) >= 0 ? (String(v).trim() === '' ? '' : numOr(v, 0)) : v;
+  recalc();
 }
 function removeManual(key) {
   state.manual = state.manual.filter(x => x.key !== key);
@@ -492,7 +548,9 @@ async function exportExcel() {
   if (!data.jobName) { toast('工事名を入力してください'); return; }
   const lines = computeLines().map(ln => ({
     material: ln.material, label: ln.label, usage: ln.usage, pack: ln.pack, packUnit: ln.packUnit,
-    qty: ln.manual ? '' : round2(ln.qty), delivery: ln.delivery, deliveryUnit: ln.deliveryUnit,
+    qty: (ln.manual && !ln.autoCalc) ? '' : round2(ln.qty), delivery: ln.delivery, deliveryUnit: ln.deliveryUnit,
+    // 手入力行は自分で数量(面積・長さ・箇所)を持つ。Excel側で =数量×使用量÷荷姿 の数式にする
+    area: ln.manual ? ln.area : '', autoCalc: !!ln.autoCalc,
     breakdown: ln.breakdown, manual: ln.manual, specIdx: ln.specIdx || []
   }));
   const specs = state.specs.map(s => ({
