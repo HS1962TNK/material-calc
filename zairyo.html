@@ -50,6 +50,11 @@ tr.grp-first td{border-top:2px solid #c9cdd3}
 .spec-row{display:grid;grid-template-columns:1fr 110px 110px 40px;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid #eee}
 .spec-row .name{font-size:13px;font-weight:700}
 .spec-row .sub{font-size:11px;color:#8a8f98}
+/* 施工場所ごとの内訳と、最後の「合計」をひとかたまりずつ出す */
+.blk{margin:0 0 16px}
+.blk-title{display:flex;align-items:baseline;gap:10px;font-size:13px;font-weight:700;margin:0 0 6px;
+  padding:0 0 4px;border-bottom:2px solid #1B3A6B}
+.blk-title .muted{font-size:11px;font-weight:400}
 .choice{display:grid;grid-template-columns:110px 1fr;gap:8px;align-items:center;margin:6px 0 0 0}
 .choice span{font-size:12px;color:#6b7280}
 
@@ -379,34 +384,65 @@ function setChoice(key, no, material) {
 //    今まで通り行を分けて使用数量の合計から搬入数量を出す。
 // ══════════════════════════════════════════
 const round3 = (n) => Math.round(n * 1000) / 1000;
+const ceilQty = (q) => Math.ceil(round2(q) - 1e-9);
+
+// 1つの工法の中で、材料ごとに使用量を足し合わせたものを返す。
+// 選択式の工程は、選ばれていなければ飛ばす(未選択の工程は計算に入れない)。
+function specMaterials(s) {
+  const perSpec = new Map(); // 材料名 -> {usage, pack, usageUnit, packUnit, deliveryUnit}
+  (STEPS[s.specId] || []).forEach(st => {
+    let material = st.material, usage = st.usage, pack = st.pack, usageUnit = st.usageUnit, packUnit = st.packUnit;
+    if (st.selectable) {
+      const chosen = s.choices[st.no];
+      if (!chosen) return;
+      const o = (OPTIONS[st.optionGroup] || []).find(x => x.material === chosen);
+      if (!o) return;
+      material = o.material; usage = o.usage; pack = o.pack;
+      usageUnit = o.usageUnit || st.usageUnit; packUnit = o.packUnit || st.packUnit;
+    }
+    if (!material) return;
+
+    let e = perSpec.get(material);
+    if (!e) {
+      e = { usage: 0, pack: pack, usageUnit: usageUnit, packUnit: packUnit, deliveryUnit: st.deliveryUnit };
+      perSpec.set(material, e);
+    }
+    e.usage = round3(e.usage + numOr(usage, 0));   // 0.8+1.1 が 1.9000000000000001 にならないように丸める
+    if (!numOr(e.pack, 0) && numOr(pack, 0)) { e.pack = pack; e.packUnit = packUnit; }
+    if (!e.usageUnit) e.usageUnit = usageUnit;
+    if (!e.deliveryUnit) e.deliveryUnit = st.deliveryUnit;
+  });
+  return perSpec;
+}
+
+// 施工場所ごとの内訳。Excelの「使用数量」ブロックと、画面の場所ごとの表に使う。
+// 使用量・荷姿の手直し(state.edits)は合計表と同じキーで当てるので、両方に効く。
+function computeBlocks() {
+  return state.specs.map((s, si) => {
+    const lines = [];
+    specMaterials(s).forEach((e, material) => {
+      const editKey = material + '|' + e.usage;
+      const ed = state.edits[editKey] || {};
+      const u = numOr(ed.usage, e.usage);
+      const p = numOr(ed.pack, numOr(e.pack, 0));
+      const qty = p > 0 ? (s.area * u) / p : 0;
+      lines.push({
+        material: material, usage: u, usageUnit: e.usageUnit, pack: p, packUnit: e.packUnit,
+        deliveryUnit: e.deliveryUnit, qty: qty, delivery: ceilQty(qty)
+      });
+    });
+    return {
+      key: s.key, specIdx: si, label: s.label, place: s.place || '',
+      areaKind: s.areaKind || '', area: s.area, lines: lines
+    };
+  }).filter(b => b.lines.length);
+}
 
 function computeLines() {
   const map = new Map(); // 材料名 -> {material, rows:[{usage,usageUnit,pack,packUnit,deliveryUnit,qty}]}
   state.specs.forEach((s, si) => {
     // まずこの工法の中で材料ごとに使用量を足し合わせる
-    const perSpec = new Map(); // 材料名 -> {usage, pack, usageUnit, packUnit, deliveryUnit}
-    (STEPS[s.specId] || []).forEach(st => {
-      let material = st.material, usage = st.usage, pack = st.pack, usageUnit = st.usageUnit, packUnit = st.packUnit;
-      if (st.selectable) {
-        const chosen = s.choices[st.no];
-        if (!chosen) return;
-        const o = (OPTIONS[st.optionGroup] || []).find(x => x.material === chosen);
-        if (!o) return;
-        material = o.material; usage = o.usage; pack = o.pack;
-        usageUnit = o.usageUnit || st.usageUnit; packUnit = o.packUnit || st.packUnit;
-      }
-      if (!material) return;
-
-      let e = perSpec.get(material);
-      if (!e) {
-        e = { usage: 0, pack: pack, usageUnit: usageUnit, packUnit: packUnit, deliveryUnit: st.deliveryUnit };
-        perSpec.set(material, e);
-      }
-      e.usage = round3(e.usage + numOr(usage, 0));   // 0.8+1.1 が 1.9000000000000001 にならないように丸める
-      if (!numOr(e.pack, 0) && numOr(pack, 0)) { e.pack = pack; e.packUnit = packUnit; }
-      if (!e.usageUnit) e.usageUnit = usageUnit;
-      if (!e.deliveryUnit) e.deliveryUnit = st.deliveryUnit;
-    });
+    const perSpec = specMaterials(s);
 
     // 足し合わせた使用量で、材料ごとの行に積む
     perSpec.forEach((e, material) => {
@@ -463,13 +499,33 @@ function computeLines() {
   return lines;
 }
 
+const LINES_HEAD = '<thead><tr>' +
+  '<th>材料名</th><th class="num">使用量</th><th class="num">荷姿</th><th class="num">使用数量</th><th class="num">搬入数量</th><th>単位</th><th></th>' +
+  '</tr></thead>';
+
+// 施工場所ごとの表。ここは見るだけ(数字の手直しは下の「合計」表でする)。
+function blockTable(b) {
+  return '<div class="blk"><div class="blk-title">' + esc(placeLabel(b)) +
+    '<span class="muted">' + round2(b.area) + ' m2</span></div>' +
+    '<div class="tbl-wrap"><table>' + LINES_HEAD + '<tbody>' +
+    b.lines.map(ln =>
+      '<tr><td>' + esc(ln.material) + '</td>' +
+      '<td class="num">' + ln.usage + ' ' + esc(ln.usageUnit || '') + '</td>' +
+      '<td class="num">' + ln.pack + ' ' + esc(ln.packUnit || '') + '</td>' +
+      '<td class="num">' + round2(ln.qty) + '</td>' +
+      '<td class="num"><b>' + ln.delivery + '</b></td>' +
+      '<td>' + esc(ln.deliveryUnit || '') + '</td><td></td></tr>'
+    ).join('') + '</tbody></table></div></div>';
+}
+
 function recalc() {
   const lines = computeLines();
   const el = $('lines');
   if (!lines.length) { el.innerHTML = '<div class="loading">工法を追加すると計算されます</div>'; return; }
-  el.innerHTML = '<div class="tbl-wrap"><table><thead><tr>' +
-    '<th>材料名</th><th class="num">使用量</th><th class="num">荷姿</th><th class="num">使用数量</th><th class="num">搬入数量</th><th>単位</th><th></th>' +
-    '</tr></thead><tbody>' +
+  const blocks = computeBlocks();
+  el.innerHTML = blocks.map(blockTable).join('') +
+    '<div class="blk"><div class="blk-title">合計<span class="muted">現場に搬入する数量</span></div>' +
+    '<div class="tbl-wrap"><table>' + LINES_HEAD + '<tbody>' +
     lines.map(ln => {
       if (ln.manual) {
         const mset = (f) => 'onchange="setManual(\'' + ln.key + '\',\'' + f + '\',this.value)"';
@@ -493,7 +549,7 @@ function recalc() {
         '<td class="num">' + round2(ln.qty) + '</td>' +
         '<td class="num"><b>' + (ln.first ? ln.delivery : '') + '</b></td>' +
         '<td>' + esc(ln.first ? (ln.deliveryUnit || '') : '') + '</td><td></td></tr>';
-    }).join('') + '</tbody></table></div>';
+    }).join('') + '</tbody></table></div></div>';
 }
 
 function setEdit(editKey, field, v) {
@@ -597,15 +653,23 @@ async function exportExcel() {
     area: ln.manual ? ln.area : '', autoCalc: !!ln.autoCalc,
     breakdown: ln.breakdown, manual: ln.manual, specIdx: ln.specIdx || []
   }));
+  // 面積は「施工場所・部位・面積」の1行1工法で出す(平場/立上りの列分けはやめた)
   const specs = state.specs.map(s => ({
-    label: s.label,
-    place: s.place || '',
-    areaFlat: s.areaKind === '平場' ? s.area : '',
-    areaWall: s.areaKind === '立上り' ? s.area : '',
-    areaOther: s.areaKind ? '' : s.area
+    label: s.label, place: s.place || '', part: s.areaKind || '', area: s.area
+  }));
+  // 施工場所ごとの内訳(Excelの「使用数量」ブロック)
+  const blocks = computeBlocks().map(b => ({
+    place: b.place, part: b.areaKind, specIdx: b.specIdx,
+    lines: b.lines.map(ln => ({
+      material: ln.material, usage: ln.usage, qty: round2(ln.qty),
+      delivery: ln.delivery, deliveryUnit: ln.deliveryUnit
+    }))
   }));
   toast('Excelを作成中...', 30000);
-  const r = await apiPost({ action: 'exportExcel', data: { jobName: data.jobName, address: data.address, maker: data.maker, specs: specs, lines: lines } });
+  const r = await apiPost({ action: 'exportExcel', data: {
+    jobName: data.jobName, address: data.address, maker: data.maker,
+    specs: specs, blocks: blocks, lines: lines
+  } });
   if (r.status !== 'ok') { toast('Excel出力に失敗しました: ' + (r.message || '')); return; }
   const bin = atob(r.base64);
   const buf = new Uint8Array(bin.length);
