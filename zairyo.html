@@ -391,7 +391,8 @@ const ceilQty = (q) => Math.ceil(round2(q) - 1e-9);
 function specMaterials(s) {
   const perSpec = new Map(); // 材料名 -> {usage, pack, usageUnit, packUnit, deliveryUnit}
   (STEPS[s.specId] || []).forEach(st => {
-    let material = st.material, usage = st.usage, pack = st.pack, usageUnit = st.usageUnit, packUnit = st.packUnit;
+    let material = st.material, usage = st.usage, pack = st.pack;
+    let usageUnit = st.usageUnit, packUnit = st.packUnit, deliveryUnit = st.deliveryUnit;
     if (st.selectable) {
       const chosen = s.choices[st.no];
       if (!chosen) return;
@@ -399,18 +400,21 @@ function specMaterials(s) {
       if (!o) return;
       material = o.material; usage = o.usage; pack = o.pack;
       usageUnit = o.usageUnit || st.usageUnit; packUnit = o.packUnit || st.packUnit;
+      // 選択式の工程は、工程マスターに搬入単位が入っていないことがある(材料名が空なので埋められない)。
+      // その場合は荷姿の単位「kg/SET」の「/」より後ろを使う。入れておかないと単位の欄が空で出る。
+      if (!deliveryUnit) deliveryUnit = String(packUnit || '').split('/')[1] || '';
     }
     if (!material) return;
 
     let e = perSpec.get(material);
     if (!e) {
-      e = { usage: 0, pack: pack, usageUnit: usageUnit, packUnit: packUnit, deliveryUnit: st.deliveryUnit };
+      e = { usage: 0, pack: pack, usageUnit: usageUnit, packUnit: packUnit, deliveryUnit: deliveryUnit };
       perSpec.set(material, e);
     }
     e.usage = round3(e.usage + numOr(usage, 0));   // 0.8+1.1 が 1.9000000000000001 にならないように丸める
     if (!numOr(e.pack, 0) && numOr(pack, 0)) { e.pack = pack; e.packUnit = packUnit; }
     if (!e.usageUnit) e.usageUnit = usageUnit;
-    if (!e.deliveryUnit) e.deliveryUnit = st.deliveryUnit;
+    if (!e.deliveryUnit) e.deliveryUnit = deliveryUnit;
   });
   return perSpec;
 }
