@@ -106,13 +106,17 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
 
   <div class="card">
     <div class="card-title"><span>工法と面積</span></div>
+    <div>
+      <label class="f">工法(仕様)</label>
+      <select id="specSel"></select>
+    </div>
     <div class="row3">
       <div>
-        <label class="f">工法(仕様)</label>
-        <select id="specSel"></select>
+        <label class="f">施工場所</label>
+        <input id="areaPlace" placeholder="屋上・北側バルコニー など">
       </div>
       <div>
-        <label class="f">区分</label>
+        <label class="f">部位</label>
         <select id="areaKind"><option value="平場">平場</option><option value="立上り">立上り</option><option value="">その他</option></select>
       </div>
       <div>
@@ -191,7 +195,7 @@ let BREAKDOWN = {};  // 材料名 -> {main,hardener,other,unit}
 
 let state = {
   id: '', jobName: '', address: '', maker: '', kind: '',
-  specs: [],      // {key, specId, label, areaKind, area, choices:{順序: 材料名}}
+  specs: [],      // {key, specId, label, place, areaKind, area, choices:{順序: 材料名}}
   manual: [],     // {key, material, delivery, deliveryUnit}
   edits: {}       // '材料名|使用量キー' -> {usage, pack}
 };
@@ -288,7 +292,11 @@ async function addSpec() {
   if (!specId) { toast('工法を選んでください'); return; }
   if (!area) { toast('面積を入力してください'); return; }
   const spec = MASTER.specs.find(s => s.id === specId);
-  state.specs.push({ key: newKey(), specId: specId, label: spec ? spec.label : specId, areaKind: $('areaKind').value, area: area, choices: {} });
+  state.specs.push({
+    key: newKey(), specId: specId, label: spec ? spec.label : specId,
+    place: $('areaPlace').value.trim(), areaKind: $('areaKind').value, area: area, choices: {}
+  });
+  // 面積だけ消す。施工場所は同じ場所で工法を続けて足すことが多いので残しておく
   $('areaVal').value = '';
   await ensureSteps();
   renderSpecs();
@@ -335,11 +343,20 @@ function renderSpecs() {
     }).join('');
     return '<div class="spec-row">' +
       '<div><div class="name">' + esc(s.label) + '</div><div class="sub">' + steps.length + '工程</div></div>' +
-      '<div class="muted">' + esc(s.areaKind || '-') + '</div>' +
+      '<div class="muted">' + esc(placeLabel(s)) + '</div>' +
       '<div><input class="num" type="number" step="0.01" value="' + s.area + '" onchange="setArea(\'' + s.key + '\',this.value)"></div>' +
       '<div><button class="mini del" onclick="removeSpec(\'' + s.key + '\')">✕</button></div>' +
       '</div>' + (choices ? '<div style="margin:0 0 10px 4px">' + choices + '</div>' : '');
   }).join('');
+}
+
+// 施工場所と部位をつないだ呼び名。「屋上の平場」「北側バルコニーの立上り」のように出す。
+// 場所が空なら部位だけ、部位が「その他」なら場所だけにする。
+function placeLabel(s) {
+  const place = (s.place || '').trim();
+  const part = s.areaKind || '';
+  if (place && part) return place + 'の' + part;
+  return place || part || 'その他';
 }
 
 function setArea(key, v) {
@@ -355,10 +372,19 @@ function setChoice(key, no, material) {
 //  計算
 //  工法ごとに 面積×使用量÷荷姿 = 使用数量。同じ材料は使用数量を合計してから切り上げて搬入数量にする
 //  (元のExcelの =ROUNDUP(F42+F43,0) と同じ考え方)。
+//
+//  ★同じ工法の中で同じ材料が複数の工程に出るときは、使用量を足して1行にまとめる。
+//    例: ウレタン 0.8 + 1.1 + 2.0 → ウレタン 3.9kg/m2 の1行。
+//    工法が同じなら面積も同じなので足せる。工法が違う(面積が違う)場合はまとめず、
+//    今まで通り行を分けて使用数量の合計から搬入数量を出す。
 // ══════════════════════════════════════════
+const round3 = (n) => Math.round(n * 1000) / 1000;
+
 function computeLines() {
   const map = new Map(); // 材料名 -> {material, rows:[{usage,usageUnit,pack,packUnit,deliveryUnit,qty}]}
   state.specs.forEach((s, si) => {
+    // まずこの工法の中で材料ごとに使用量を足し合わせる
+    const perSpec = new Map(); // 材料名 -> {usage, pack, usageUnit, packUnit, deliveryUnit}
     (STEPS[s.specId] || []).forEach(st => {
       let material = st.material, usage = st.usage, pack = st.pack, usageUnit = st.usageUnit, packUnit = st.packUnit;
       if (st.selectable) {
@@ -371,20 +397,33 @@ function computeLines() {
       }
       if (!material) return;
 
-      const editKey = material + '|' + usage;
+      let e = perSpec.get(material);
+      if (!e) {
+        e = { usage: 0, pack: pack, usageUnit: usageUnit, packUnit: packUnit, deliveryUnit: st.deliveryUnit };
+        perSpec.set(material, e);
+      }
+      e.usage = round3(e.usage + numOr(usage, 0));   // 0.8+1.1 が 1.9000000000000001 にならないように丸める
+      if (!numOr(e.pack, 0) && numOr(pack, 0)) { e.pack = pack; e.packUnit = packUnit; }
+      if (!e.usageUnit) e.usageUnit = usageUnit;
+      if (!e.deliveryUnit) e.deliveryUnit = st.deliveryUnit;
+    });
+
+    // 足し合わせた使用量で、材料ごとの行に積む
+    perSpec.forEach((e, material) => {
+      const editKey = material + '|' + e.usage;
       const ed = state.edits[editKey] || {};
-      const u = numOr(ed.usage, numOr(usage, 0));
-      const p = numOr(ed.pack, numOr(pack, 0));
+      const u = numOr(ed.usage, e.usage);
+      const p = numOr(ed.pack, numOr(e.pack, 0));
 
       if (!map.has(material)) map.set(material, { material: material, rows: [] });
       const g = map.get(material);
       let row = g.rows.find(r => r.editKey === editKey);
       if (!row) {
-        row = { editKey: editKey, usage: u, usageUnit: usageUnit, pack: p, packUnit: packUnit, deliveryUnit: st.deliveryUnit, qty: 0, parts: [], specIdx: [] };
+        row = { editKey: editKey, usage: u, usageUnit: e.usageUnit, pack: p, packUnit: e.packUnit, deliveryUnit: e.deliveryUnit, qty: 0, parts: [], specIdx: [] };
         g.rows.push(row);
       }
       row.qty += p > 0 ? (s.area * u) / p : 0;
-      row.parts.push(s.areaKind || s.label);
+      row.parts.push(placeLabel(s));
       if (row.specIdx.indexOf(si) < 0) row.specIdx.push(si); // Excel出力で面積セルを参照する数式に使う
     });
   });
@@ -534,7 +573,8 @@ async function loadDoc(id) {
     id: r.id, jobName: d.jobName || '', address: d.address || '', maker: d.maker || '', kind: d.kind || '',
     specs: d.specs || [], manual: d.manual || [], edits: d.edits || {}
   };
-  state.specs.forEach(s => { if (!s.key) s.key = newKey(); if (!s.choices) s.choices = {}; });
+  // 施工場所を足す前に保存した計算書には place が無いので、空で埋めておく
+  state.specs.forEach(s => { if (!s.key) s.key = newKey(); if (!s.choices) s.choices = {}; if (s.place === undefined) s.place = ''; });
   state.manual.forEach(m => { if (!m.key) m.key = newKey(); });
   $('jobName').value = state.jobName;
   $('address').value = state.address;
@@ -559,6 +599,7 @@ async function exportExcel() {
   }));
   const specs = state.specs.map(s => ({
     label: s.label,
+    place: s.place || '',
     areaFlat: s.areaKind === '平場' ? s.area : '',
     areaWall: s.areaKind === '立上り' ? s.area : '',
     areaOther: s.areaKind ? '' : s.area
