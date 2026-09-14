@@ -216,6 +216,7 @@ async function init() {
     const r = await apiGet({ action: 'getInit' });
     if (r.status !== 'ok') { banner('マスターの読み込みに失敗しました: ' + (r.message || '')); return; }
     MASTER = r;
+    buildSubMaterialList();
     if (!MASTER.specs.length) { banner('マスターが空です。スプレッドシートで setupMasters を実行してください。'); }
     buildMakerSelect();
     buildCatMakerSelect();
@@ -534,7 +535,7 @@ function recalc() {
     lines.map(ln => {
       if (ln.manual) {
         const mset = (f) => 'onchange="setManual(\'' + ln.key + '\',\'' + f + '\',this.value)"';
-        return '<tr class="grp-first"><td><input value="' + esc(ln.material) + '" ' + mset('material') + ' placeholder="材料名"></td>' +
+        return '<tr class="grp-first"><td><input list="subMaterialList" value="' + esc(ln.material) + '" ' + mset('material') + ' placeholder="材料名"></td>' +
           '<td class="num"><input class="num w60" type="number" step="0.01" value="' + ln.usage + '" ' + mset('usage') + ' placeholder="使用量">' +
             '<input class="w50" value="' + esc(ln.usageUnit) + '" ' + mset('usageUnit') + ' placeholder="kg"></td>' +
           '<td class="num"><input class="num w60" type="number" step="0.01" value="' + ln.pack + '" ' + mset('pack') + ' placeholder="荷姿">' +
@@ -573,7 +574,30 @@ function setManual(key, field, v) {
   // 数字の欄は数値にする。空欄は空のままにして「未入力」を保てるようにする(0とは区別する)
   const numFields = ['delivery', 'usage', 'pack', 'area'];
   m[field] = numFields.indexOf(field) >= 0 ? (String(v).trim() === '' ? '' : numOr(v, 0)) : v;
+  // 副資材シートに登録してある材料なら、単位を入れる。使用量・荷姿は登録してあって、行がまだ空のときだけ入れる
+  if (field === 'material') {
+    const sub = findSubMaterial(v);
+    if (sub) {
+      if (sub.unit) m.deliveryUnit = sub.unit;
+      if (m.usage === '' && sub.usage !== '') { m.usage = numOr(sub.usage, ''); m.usageUnit = sub.usageUnit || m.usageUnit; }
+      if (m.pack === '' && sub.pack !== '') { m.pack = numOr(sub.pack, ''); m.packUnit = sub.packUnit || m.packUnit; }
+    }
+  }
   recalc();
+}
+
+// 「副資材」シートに登録した材料(名前・単位など。単価は画面に来ない)
+// 全角・半角と空白の違いは同じとみなす(仕入額の突き合わせと同じ考え方)
+const normName = (x) => String(x || '').normalize('NFKC').replace(/\s+/g, '');
+function findSubMaterial(name) {
+  const n = normName(name);
+  return n ? (MASTER.subMaterials || []).find(x => normName(x.name) === n) : null;
+}
+function buildSubMaterialList() {
+  let dl = document.getElementById('subMaterialList');
+  if (!dl) { dl = document.createElement('datalist'); dl.id = 'subMaterialList'; document.body.appendChild(dl); }
+  dl.innerHTML = (MASTER.subMaterials || []).map(x =>
+    '<option value="' + esc(x.name) + '">' + esc(x.unit ? '単位: ' + x.unit : '') + '</option>').join('');
 }
 function removeManual(key) {
   state.manual = state.manual.filter(x => x.key !== key);
