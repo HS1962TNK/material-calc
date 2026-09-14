@@ -81,6 +81,7 @@ dialog::backdrop{background:rgba(0,0,0,.4)}
     <button onclick="newDoc()">新規</button>
     <button onclick="saveDoc()">保存</button>
     <button onclick="exportExcel()">Excel</button>
+    <button onclick="exportPurchase()" title="社内用。提出するExcelとは別のファイルで出ます">仕入額</button>
     <a class="manual" href="zairyo-manual.html" target="_blank" title="使い方を見る">📖 マニュアル</a>
   </div>
 </div>
@@ -675,16 +676,53 @@ async function exportExcel() {
     specs: specs, blocks: blocks, lines: lines
   } });
   if (r.status !== 'ok') { toast('Excel出力に失敗しました: ' + (r.message || '')); return; }
+  downloadXlsx(r, '材料搬入計算書.xlsx');
+  toast('Excelをダウンロードしました');
+}
+
+// GASが返した base64 の xlsx をダウンロードさせる(材料搬入計算書・仕入額で共通)
+function downloadXlsx(r, fallbackName) {
   const bin = atob(r.base64);
   const buf = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
   const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = r.fileName || '材料搬入計算書.xlsx';
+  a.download = r.fileName || fallbackName;
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-  toast('Excelをダウンロードしました');
+}
+
+// 仕入額(社内用)。提出する材料搬入計算書とは別のファイルで出す(提出物に単価を混ぜないため)。
+// 単価はスプレッドシートの「材料単価」シートにだけあり、合言葉を知っている人だけが出せる。
+// 合言葉はこの端末に覚えさせる(違っていたら消して、次回また聞く)。
+const PURCHASE_PASS_KEY = 'zairyo.purchasePass';
+async function exportPurchase() {
+  const data = collect();
+  if (!data.jobName) { toast('工事名を入力してください'); return; }
+  // 材料ごとに1行。同じ材料が複数行ある場合は先頭行に合計の搬入数量が入っている
+  const items = computeLines().filter(ln => ln.first).map(ln => ({
+    material: ln.material, delivery: ln.delivery, deliveryUnit: ln.deliveryUnit, pack: ln.pack, packUnit: ln.packUnit
+  }));
+  if (!items.length) { toast('工法を追加してください'); return; }
+  let pass = '';
+  try { pass = localStorage.getItem(PURCHASE_PASS_KEY) || ''; } catch (e) { /* 保存できない環境では毎回たずねる */ }
+  if (!pass) {
+    pass = (prompt('仕入額（社内用）の合言葉を入れてください') || '').trim();
+    if (!pass) return;
+  }
+  toast('仕入額を作成中...', 30000);
+  const r = await apiPost({ action: 'exportPurchase', data: {
+    pass: pass, jobName: data.jobName, address: data.address, maker: data.maker, items: items
+  } });
+  if (r.status !== 'ok') {
+    if (r.code === 'pass') { try { localStorage.removeItem(PURCHASE_PASS_KEY); } catch (e) { /* 無視 */ } }
+    toast('仕入額を出せませんでした: ' + (r.message || ''));
+    return;
+  }
+  try { localStorage.setItem(PURCHASE_PASS_KEY, pass); } catch (e) { /* 覚えられなくても出力はできる */ }
+  downloadXlsx(r, '仕入額(社内用).xlsx');
+  toast('仕入額（社内用）をダウンロードしました');
 }
 
 init();
