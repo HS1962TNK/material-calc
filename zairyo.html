@@ -388,6 +388,24 @@ function setChoice(key, no, material) {
 const round3 = (n) => Math.round(n * 1000) / 1000;
 const ceilQty = (q) => Math.ceil(round2(q) - 1e-9);
 
+// ドラムと小分けの組み合わせ(スプレー材)。MASTER.packSets[材料名] = {drum, drumUnit, smallName, small, smallUnit,
+// toner, tonerPack, tonerUnit, tonerSmall, tonerSmallPack, tonerSmallUnit}
+function packSetOf(material) {
+  const ps = (MASTER.packSets || {})[material];
+  return ps && numOr(ps.drum, 0) > 0 ? ps : null;
+}
+// 必要な量(kg)をドラムでまかない、残りを小分けで出す。
+// 小分けの合計がドラム1本分以上になるなら、ドラムを1本増やして小分けは出さない。
+function packMix(needKg, drum, small) {
+  if (!(drum > 0)) return { drums: 0, smalls: 0 };
+  if (!(small > 0)) return { drums: ceilQty(needKg / drum), smalls: 0 };
+  let drums = Math.floor(round3(needKg / drum) + 1e-9);
+  const rest = round3(needKg - drums * drum);
+  let smalls = rest > 0 ? ceilQty(rest / small) : 0;
+  if (smalls * small >= drum) { drums += 1; smalls = 0; }
+  return { drums: drums, smalls: smalls };
+}
+
 // 1つの工法の中で、材料ごとに使用量を足し合わせたものを返す。
 // 選択式の工程は、選ばれていなければ飛ばす(未選択の工程は計算に入れない)。
 function specMaterials(s) {
@@ -407,6 +425,12 @@ function specMaterials(s) {
       if (!deliveryUnit) deliveryUnit = String(packUnit || '').split('/')[1] || '';
     }
     if (!material) return;
+    // ドラムと小分けがある材料(スプレー材)は、ドラムの荷姿を「荷姿の組み合わせ」シートの値にそろえる
+    const ps = packSetOf(material);
+    if (ps) {
+      pack = ps.drum; packUnit = ps.drumUnit || packUnit;
+      deliveryUnit = String(ps.drumUnit || '').split('/')[1] || deliveryUnit;
+    }
 
     let e = perSpec.get(material);
     if (!e) {
@@ -471,18 +495,49 @@ function computeLines() {
   });
 
   const lines = [];
+  const extras = new Map();   // 小分け・トナーの行(同じ品名は1行にまとめる)
+  const addExtra = (name, pack, packUnit, delivery, qty) => {
+    if (!name || !(delivery > 0)) return;
+    const x = extras.get(name);
+    if (x) { x.delivery += delivery; if (qty !== '') x.qty = round2(numOr(x.qty, 0) + qty); return; }
+    const ln = {
+      material: name, label: name, editKey: 'extra|' + name, usage: '', usageUnit: '',
+      pack: pack, packUnit: packUnit || '', deliveryUnit: String(packUnit || '').split('/')[1] || '',
+      qty: qty, specIdx: [], first: true, groupSize: 1, delivery: delivery,
+      breakdown: null, manual: false, extra: true
+    };
+    extras.set(name, ln);
+    lines.push(ln);
+  };
   map.forEach(g => {
     const total = g.rows.reduce((a, r) => a + r.qty, 0);
+    const ps = packSetOf(g.material);
+    let mix = null, drum = 0;
+    if (ps) {
+      drum = numOr(g.rows[0].pack, 0);
+      const needKg = g.rows.reduce((a, r) => a + r.qty * numOr(r.pack, 0), 0);
+      mix = packMix(needKg, drum, numOr(ps.small, 0));
+      mix.rest = round3(needKg - mix.drums * drum);
+    }
     g.rows.forEach((r, i) => {
       lines.push({
-        material: g.material, label: g.material + (g.rows.length > 1 ? '（' + [...new Set(r.parts)].join('・') + '）' : ''),
+        material: g.material,
+        label: g.material + (ps ? ' ドラム' : '') + (g.rows.length > 1 ? '（' + [...new Set(r.parts)].join('・') + '）' : ''),
         editKey: r.editKey, usage: r.usage, usageUnit: r.usageUnit, pack: r.pack, packUnit: r.packUnit,
         deliveryUnit: r.deliveryUnit, qty: r.qty, specIdx: r.specIdx,
         first: i === 0, groupSize: g.rows.length,
-        delivery: i === 0 ? Math.ceil(round2(total) - 1e-9) : '',
+        delivery: i === 0 ? (mix ? mix.drums : Math.ceil(round2(total) - 1e-9)) : '',
+        fixedDelivery: mix && i === 0,   // Excelでは切り上げの数式にせず、組み合わせた数を入れる
         breakdown: BREAKDOWN[g.material] || null, manual: false
       });
     });
+    if (mix) {
+      const small = numOr(ps.small, 0);
+      if (mix.smalls > 0) addExtra(ps.smallName || (g.material + ' 小分け'), small, ps.smallUnit, mix.smalls, round2(mix.rest / small));
+      // トナーは硬化剤1缶に1缶。ドラム1セットにドラム用1缶、小分け1セットに小分け用1缶
+      addExtra(ps.toner, numOr(ps.tonerPack, ''), ps.tonerUnit, mix.drums, '');
+      addExtra(ps.tonerSmall, numOr(ps.tonerSmallPack, ''), ps.tonerSmallUnit, mix.smalls, '');
+    }
   });
   // 手入力行(下地処理など、カタログの標準仕様に載らない工程の材料)。
   // 使用量と荷姿を入れてあれば、数量(面積・長さ・箇所)から自動で計算する。
@@ -547,6 +602,12 @@ function recalc() {
             : '<input class="num w60" type="number" step="1" value="' + ln.delivery + '" ' + mset('delivery') + '>') + '</td>' +
           '<td><input class="w60" value="' + esc(ln.deliveryUnit || '') + '" ' + mset('deliveryUnit') + '></td>' +
           '<td><button class="mini del" onclick="removeManual(\'' + ln.key + '\')">✕</button></td></tr>';
+      }
+      if (ln.extra) {
+        return '<tr class="grp-first extra"><td>' + esc(ln.label) + '</td><td class="num"></td>' +
+          '<td class="num">' + ln.pack + ' ' + esc(ln.packUnit || '') + '</td>' +
+          '<td class="num">' + (ln.qty === '' ? '' : round2(ln.qty)) + '</td>' +
+          '<td class="num"><b>' + ln.delivery + '</b></td><td>' + esc(ln.deliveryUnit || '') + '</td><td></td></tr>';
       }
       return '<tr' + (ln.first ? ' class="grp-first"' : '') + '>' +
         '<td>' + esc(ln.label) + '</td>' +
@@ -677,10 +738,12 @@ async function exportExcel() {
   if (!data.jobName) { toast('工事名を入力してください'); return; }
   const lines = computeLines().map(ln => ({
     material: ln.material, label: ln.label, usage: ln.usage, pack: ln.pack, packUnit: ln.packUnit,
-    qty: (ln.manual && !ln.autoCalc) ? '' : round2(ln.qty), delivery: ln.delivery, deliveryUnit: ln.deliveryUnit,
+    qty: (ln.manual && !ln.autoCalc) || ln.qty === '' ? '' : round2(ln.qty), delivery: ln.delivery, deliveryUnit: ln.deliveryUnit,
     // 手入力行は自分で数量(面積・長さ・箇所)を持つ。Excel側で =数量×使用量÷荷姿 の数式にする
     area: ln.manual ? ln.area : '', autoCalc: !!ln.autoCalc,
-    breakdown: ln.breakdown, manual: ln.manual, specIdx: ln.specIdx || []
+    breakdown: ln.breakdown, manual: ln.manual, specIdx: ln.specIdx || [],
+    // extra: 小分け・トナーの行(数は値で入れる) / fixedDelivery: ドラムの搬入数量を切り上げの数式にしない
+    extra: !!ln.extra, fixedDelivery: !!ln.fixedDelivery
   }));
   // 面積は「施工場所・部位・面積」の1行1工法で出す(平場/立上りの列分けはやめた)
   const specs = state.specs.map(s => ({
