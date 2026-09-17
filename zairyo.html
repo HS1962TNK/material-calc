@@ -395,14 +395,16 @@ function packSetOf(material) {
   return ps && numOr(ps.drum, 0) > 0 ? ps : null;
 }
 // 必要な量(kg)をドラムでまかない、残りを小分けで出す。
-// 小分けの合計がドラム1本分以上になるなら、ドラムを1本増やして小分けは出さない。
+// 小分けが SMALL_MAX セットを超える(菅原氏 2026-09-17)か、小分けの合計がドラム1本分以上になるなら、
+// ドラムを1本増やして小分けは出さない。
+const SMALL_MAX = 5;
 function packMix(needKg, drum, small) {
   if (!(drum > 0)) return { drums: 0, smalls: 0 };
   if (!(small > 0)) return { drums: ceilQty(needKg / drum), smalls: 0 };
   let drums = Math.floor(round3(needKg / drum) + 1e-9);
   const rest = round3(needKg - drums * drum);
   let smalls = rest > 0 ? ceilQty(rest / small) : 0;
-  if (smalls * small >= drum) { drums += 1; smalls = 0; }
+  if (smalls > SMALL_MAX || smalls * small >= drum) { drums += 1; smalls = 0; }
   return { drums: drums, smalls: smalls };
 }
 
